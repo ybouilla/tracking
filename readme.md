@@ -146,6 +146,43 @@ Mean over frames ± standard deviation.
 
 **RMSE**
 
+### RMSE Results by Prediction Horizon
+
+#### +1 frame (0.05 s ahead)
+
+| Class | vs Detection RMSE | vs Detection CI | n | vs GT RMSE | vs GT CI | n |
+| --- | --- | --- | --- | --- | --- | --- |
+| All | 0.440 | \[0.375, 0.520\] | 1217 | 0.998 | \[0.935, 1.067\] | 912 |
+| Cyclist | 0.327 | \[0.277, 0.374\] | 127 | 0.340 | \[0.297, 0.384\] | 127 |
+| Pedestrian | 0.375 | \[0.154, 0.573\] | 488 | 0.388 | \[0.152, 0.589\] | 444 |
+| Vehicle | 0.506 | \[0.472, 0.543\] | 602 | 1.558 | \[1.485, 1.632\] | 341 |
+
+#### +3 frames (0.15 s ahead)
+
+| Class | vs Detection RMSE | vs Detection CI | n | vs GT RMSE | vs GT CI | n |
+| --- | --- | --- | --- | --- | --- | --- |
+| All | 0.623 | \[0.545, 0.705\] | 1153 | 1.065 | \[0.981, 1.146\] | 871 |
+| Cyclist | 0.456 | \[0.379, 0.533\] | 122 | 0.478 | \[0.403, 0.550\] | 122 |
+| Pedestrian | 0.516 | \[0.204, 0.750\] | 451 | 0.537 | \[0.207, 0.784\] | 416 |
+| Vehicle | 0.722 | \[0.675, 0.768\] | 580 | 1.588 | \[1.505, 1.667\] | 333 |
+
+#### +5 frames (0.25 s ahead)
+
+| Class | vs Detection RMSE | vs Detection CI | n | vs GT RMSE | vs GT CI | n |
+| --- | --- | --- | --- | --- | --- | --- |
+| All | 0.785 | \[0.717, 0.854\] | 1092 | 1.117 | \[1.026, 1.199\] | 837 |
+| Cyclist | 0.635 | \[0.519, 0.742\] | 119 | 0.662 | \[0.549, 0.765\] | 119 |
+| Pedestrian | 0.480 | \[0.239, 0.694\] | 418 | 0.501 | \[0.252, 0.730\] | 393 |
+| Vehicle | 0.976 | \[0.907, 1.040\] | 555 | 1.657 | \[1.566, 1.755\] | 325 |
+
+Legend:
+
+- RMSE: Root Mean Square Error.
+- CI: Confidence interval.
+- n: Number of samples.
+- vs Detection: Comparison against detections.
+- vs GT: Comparison against ground truth.
+
 ![img6](./imgs_readme/img_all_error_plot.png)
 
 **Trajectory predictions**
