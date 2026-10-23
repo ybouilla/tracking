@@ -161,8 +161,12 @@ Mean over frames ± standard deviation.
 
 **MOT metrics**:
 
-![mot1](./imgs_readme/img_baseline_comparison_detection_dbscan.png)
-![mot2](./imgs_readme/img_baseline_comparison_gt_dbscan.png)
+![mot1](./imgs_readme/img_mot_vs_dist_db.png)
+![mot2](./imgs_readme/img_mot_vs_range_db.png)
+
+**Kalman vs baseline (for dbscan -baseline- method)**
+![kal1](./imgs_readme/img_baseline_comparison_detection_dbscan.png)
+![kal2](./imgs_readme/img_baseline_comparison_gt_dbscan.png)
 
 ## 4. Algorithm 2: pointpainting et pointpillar
 ### 4.1 Detection: PointPainting and PointPillars
