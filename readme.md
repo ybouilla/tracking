@@ -22,6 +22,24 @@ Also we have the Lidar data (here with a Bird-eye view representation)
 ![img2](./imgs_readme/lidar.gif)
 
 ## 2. Algorithms used
+
+### 2.3 Kalman filter
+
+Kalman filter is designed as follow: Each track has a state of 4 numbers, [x, vx, y, vy] (position in metres, velocity in m/s), plus a 4×4 covariance that measures how uncertain that state is.
+
+Input from the detector: only the box centroid (x, y) is used, with 0.5 m of noise 
+Velocity: it is never measured directly. The filter infers it from how the position changes over successive frames.
+
+x' = x + vx·Δt        vx' = vx        (same for y)
+Acceleration is treated as random noise with a level of 0.5 (m²/s³). So the predicted position follows a straight line, and its uncertainty ellipse grows with Δt.
+
+Associate tracks with detections using the Mahalanobis distance, with a gate of 5. A track with no match for more than ``MAX_MISSED_FRAMES = 3`` frames is deleted. A detection with no match starts a new track with velocity 0 and high velocity uncertainty (variance 10).
+Predict ahead : from each track's current state, it runs one prediction to t+h for h = 1, 3, 5. At 20 Hz that is 0.05 s, 0.15 s and 0.25 s ahead. These predictions are only stored, not fed back into the track. When frame t+h arrives, they are compared with the matched detection and with the ground truth, which gives the RMSE per horizon.
+
+**Limitations of current approach**
+Straight lines only: it cannot anticipate turns, braking or acceleration, so errors grow with the horizon, especially for vehicles that are turning.
+New tracks start at zero speed: their first predictions are poor until the velocity has settled, which takes a few frames.
+
 ## 3. Algorithm 1: DBSCAN and Kalman filter (baseline)
 ### 3.1. Preprocessing and detection
 A semantic segmentation is then provided by the ego vehicle
@@ -32,7 +50,48 @@ A semantic segmentation is then provided by the ego vehicle
 Below a representation of vehicle detection
 ![img4](./imgs_readme/bev_dbscan_cluster.gif)
 
-### 3.2. Trajectory prediction
+
+### 3.2 Detection result
+#### Centroids
+CENTROID BEV  match: distance <= 1.0 m  (mean over frames +- std)
+  class       frames   precision      recall         F1                IoU  dist (m)
+  Car             26   0.346 +-0.46   0.385 +-0.49   0.359 +-0.46    0.418     0.780
+  Cyclist         61   0.328 +-0.47   0.328 +-0.47   0.328 +-0.47    0.287     0.322
+  Pedestrian      58   0.103 +-0.30   0.078 +-0.24   0.086 +-0.26    0.297     0.114
+  Van            360   0.000 +-0.00   0.000 +-0.00   0.000 +-0.00      nan       nan
+  ALL            361   0.033 +-0.11   0.029 +-0.10   0.030 +-0.10    0.329     0.439
+  MACRO                0.194          0.198          0.193           0.334     0.405
+
+CENTROID BEV  match: distance <= 2.0 m  (mean over frames +- std)
+  class       frames   precision      recall         F1                IoU  dist (m)
+  Car             26   0.500 +-0.48   0.538 +-0.50   0.513 +-0.48    0.384     0.944
+  Cyclist         61   0.328 +-0.47   0.328 +-0.47   0.328 +-0.47    0.287     0.322
+  Pedestrian      58   0.103 +-0.30   0.078 +-0.24   0.086 +-0.26    0.297     0.114
+  Van            360   0.044 +-0.16   0.056 +-0.20   0.047 +-0.16    0.109     1.772
+  ALL            361   0.082 +-0.19   0.080 +-0.19   0.078 +-0.18    0.226     1.130
+  MACRO                0.244          0.250          0.243           0.269     0.788
+
+IOU BEV  match: IoU >= 0.3  (mean over frames +- std)
+  class       frames   precision      recall         F1                IoU  dist (m)
+  Car             26   0.365 +-0.47   0.385 +-0.49   0.372 +-0.47    0.503     0.912
+  Cyclist         61   0.180 +-0.38   0.180 +-0.38   0.180 +-0.38    0.378     0.274
+  Pedestrian      58   0.052 +-0.22   0.052 +-0.22   0.052 +-0.22    0.420     0.107
+  Van            360   0.041 +-0.13   0.044 +-0.15   0.042 +-0.14    0.410     2.686
+  ALL            361   0.064 +-0.16   0.060 +-0.16   0.060 +-0.15    0.422     1.843
+  MACRO                0.160          0.165          0.161           0.428     0.995
+
+
+#### 3D detector
+IOU BEV  match: IoU >=0.3  (95% bootstrap CI)
+  class          GT    TP    FP    FN   precision             recall                F1
+  Car            26    10     7    16   0.588 [0.333, 0.833]  0.385 [0.207, 0.563]  0.465 [0.267, 0.649]
+  Cyclist        61    11     9    50   0.550 [0.333, 0.773]  0.180 [0.091, 0.277]  0.272 [0.145, 0.396]
+  Pedestrian     71     3     3    68   0.500 [0.000, 1.000]  0.042 [0.000, 0.096]  0.078 [0.000, 0.170]
+  Van           512    34   589   478   0.055 [0.038, 0.073]  0.066 [0.047, 0.087]  0.060 [0.042, 0.079]
+  ALL           670    58   608   612   0.087 [0.066, 0.110]  0.087 [0.067, 0.108]  0.087 [0.066, 0.109]
+  MACRO                                 0.423                 0.168                 0.219
+
+### 3.2. Trajectory prediction: plain Kalman filter
 
 ![img5](./imgs_readme/trajector_pred.gif)
 
@@ -56,3 +115,80 @@ Below a representation of vehicle detection
 ![img9](./imgs_readme/img_aggregated_trajectories_pred_+5.png)
 
 
+## 4. Algorithm 2: pointpainting et pointpillar
+### 4.1 Detection: PointPainting and PointPillars
+
+**PointPainting** (`painting.py`): each LiDAR point is projected into the
+   semantic camera image and gets its class as a one-hot vector:
+   `(x, y, z, intensity) -> (x, y, z, intensity, background, vehicle, pedestrian, two_wheeler)`
+**[PointPillars](https://arxiv.org/abs/1812.05784):** in a nutshell, the painted points are grouped into vertical
+columns (pillars, 0.16 m) on a BEV grid, encoded, and a 2D CNN predicts
+3D boxes. The head is CenterPoint-style (heatmap of object centers +
+box regression) instead of the original anchors: simpler, no anchor
+sizes to tune per class.
+
+Here an illustration of the algorithm
+![img10](./imgs_readme/pointpillar.gif)
+
+### 4.2 Detection results
+
+CENTROID 3D  match: distance <= 0.5 m  (95% bootstrap CI)
+  class          GT    TP    FP    FN   precision             recall                F1
+  Car            30    25    24     5   0.510 [0.366, 0.658]  0.833 [0.679, 0.962]  0.633 [0.486, 0.752]
+  Cyclist        61    31     2    30   0.939 [0.842, 1.000]  0.508 [0.382, 0.632]  0.660 [0.533, 0.764]
+  Pedestrian     71    34     0    37   1.000 [1.000, 1.000]  0.479 [0.365, 0.600]  0.648 [0.534, 0.750]
+  Truck           0     0     1     0   0.000 [0.000, 0.000]  0.000 [0.000, 0.000]  0.000 [0.000, 0.000]
+  Van           512     8   186   504   0.041 [0.015, 0.073]  0.016 [0.006, 0.027]  0.023 [0.008, 0.040]
+  ALL           674    98   213   576   0.315 [0.257, 0.366]  0.145 [0.116, 0.172]  0.199 [0.160, 0.234]
+  MACRO                                 0.498                 0.367                 0.393
+
+CENTROID 3D  match: distance <= 1.0 m  (95% bootstrap CI)
+  class          GT    TP    FP    FN   precision             recall                F1
+  Car            30    26    23     4   0.531 [0.385, 0.667]  0.867 [0.731, 0.970]  0.658 [0.517, 0.767]
+  Cyclist        61    33     0    28   1.000 [1.000, 1.000]  0.541 [0.413, 0.667]  0.702 [0.584, 0.800]
+  Pedestrian     71    34     0    37   1.000 [1.000, 1.000]  0.479 [0.362, 0.589]  0.648 [0.532, 0.741]
+  Truck           0     0     1     0   0.000 [0.000, 0.000]  0.000 [0.000, 0.000]  0.000 [0.000, 0.000]
+  Van           512   157    37   355   0.809 [0.754, 0.860]  0.307 [0.274, 0.338]  0.445 [0.404, 0.482]
+  ALL           674   250    61   424   0.804 [0.758, 0.847]  0.371 [0.339, 0.400]  0.508 [0.471, 0.541]
+  MACRO                                 0.668                 0.439                 0.491
+
+CENTROID BEV  match: distance <= 0.5 m  (95% bootstrap CI)
+  class          GT    TP    FP    FN   precision             recall                F1
+  Car            30    25    24     5   0.510 [0.375, 0.676]  0.833 [0.694, 0.952]  0.633 [0.500, 0.765]
+  Cyclist        61    31     2    30   0.939 [0.842, 1.000]  0.508 [0.390, 0.641]  0.660 [0.537, 0.769]
+  Pedestrian     71    34     0    37   1.000 [1.000, 1.000]  0.479 [0.368, 0.594]  0.648 [0.538, 0.745]
+  Truck           0     0     1     0   0.000 [0.000, 0.000]  0.000 [0.000, 0.000]  0.000 [0.000, 0.000]
+  Van           512     8   186   504   0.041 [0.015, 0.067]  0.016 [0.006, 0.026]  0.023 [0.008, 0.038]
+  ALL           674    98   213   576   0.315 [0.263, 0.368]  0.145 [0.118, 0.172]  0.199 [0.164, 0.234]
+  MACRO                                 0.498                 0.367                 0.393
+
+CENTROID BEV  match: distance <= 1.0 m  (95% bootstrap CI)
+  class          GT    TP    FP    FN   precision             recall                F1
+  Car            30    26    23     4   0.531 [0.388, 0.672]  0.867 [0.722, 0.971]  0.658 [0.516, 0.771]
+  Cyclist        61    33     0    28   1.000 [1.000, 1.000]  0.541 [0.415, 0.660]  0.702 [0.587, 0.795]
+  Pedestrian     71    34     0    37   1.000 [1.000, 1.000]  0.479 [0.369, 0.606]  0.648 [0.539, 0.755]
+  Truck           0     0     1     0   0.000 [0.000, 0.000]  0.000 [0.000, 0.000]  0.000 [0.000, 0.000]
+  Van           512   158    36   354   0.814 [0.760, 0.870]  0.309 [0.279, 0.342]  0.448 [0.409, 0.487]
+  ALL           674   251    60   423   0.807 [0.761, 0.850]  0.372 [0.341, 0.400]  0.510 [0.472, 0.542]
+  MACRO                                 0.669         
+
+
+  IOU 3D  match: IoU >=0.3  (95% bootstrap CI)
+  class          GT    TP    FP    FN   precision             recall                F1
+  Car            30    26    23     4   0.531 [0.391, 0.667]  0.867 [0.725, 0.974]  0.658 [0.532, 0.769]
+  Cyclist        61    33     0    28   1.000 [1.000, 1.000]  0.541 [0.413, 0.667]  0.702 [0.585, 0.800]
+  Pedestrian     71    30     4    41   0.882 [0.757, 0.974]  0.423 [0.310, 0.534]  0.571 [0.450, 0.681]
+  Truck           0     0     1     0   0.000 [0.000, 0.000]  0.000 [0.000, 0.000]  0.000 [0.000, 0.000]
+  Van           512   182    12   330   0.938 [0.907, 0.970]  0.355 [0.324, 0.386]  0.516 [0.480, 0.549]
+  ALL           674   271    40   403   0.871 [0.832, 0.906]  0.402 [0.372, 0.431]  0.550 [0.516, 0.581]
+  MACRO                                 0.670                 0.437                 0.489
+
+IOU 3D  match: IoU >=0.5  (95% bootstrap CI)
+  class          GT    TP    FP    FN   precision             recall                F1
+  Car            30    26    23     4   0.531 [0.393, 0.667]  0.867 [0.750, 0.973]  0.658 [0.530, 0.769]
+  Cyclist        61    23    10    38   0.697 [0.540, 0.857]  0.377 [0.250, 0.493]  0.489 [0.347, 0.617]
+  Pedestrian     71    20    14    51   0.588 [0.429, 0.750]  0.282 [0.182, 0.403]  0.381 [0.255, 0.514]
+  Truck           0     0     1     0   0.000 [0.000, 0.000]  0.000 [0.000, 0.000]  0.000 [0.000, 0.000]
+  Van           512   180    14   332   0.928 [0.892, 0.961]  0.352 [0.322, 0.381]  0.510 [0.478, 0.541]
+  ALL           674   249    62   425   0.801 [0.758, 0.841]  0.369 [0.342, 0.399]  0.506 [0.474, 0.537]
+  MACRO                                 0.549                 0.375                 0.408
