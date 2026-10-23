@@ -159,6 +159,10 @@ Mean over frames ± standard deviation.
 - prediction at +5
 ![img9](./imgs_readme/img_aggregated_trajectories_pred_+5.png)
 
+**MOT metrics**:
+
+![mot1](./imgs_readme/img_baseline_comparison_detection_dbscan.png)
+![mot2](./imgs_readme/img_baseline_comparison_gt_dbscan.png)
 
 ## 4. Algorithm 2: pointpainting et pointpillar
 ### 4.1 Detection: PointPainting and PointPillars
@@ -171,6 +175,21 @@ columns (pillars, 0.16 m) on a BEV grid, encoded, and a 2D CNN predicts
 3D boxes. The head is CenterPoint-style (heatmap of object centers +
 box regression) instead of the original anchors: simpler, no anchor
 sizes to tune per class.
+
+**Training & data augmentation:**
+
+   1. GT sampling       paste objects (points + box) cut from other training
+                         frames, at their original position: more instances
+                         of the rare classes (Van, Truck, Cyclist)
+   2. object noise      move / rotate each object (box + its points) a little
+   3. global flip       left / right (y -> -y)
+   4. global rotation   around the LiDAR z axis
+   5. global scaling
+   6. global translation
+   7. point dropout     remove random points (sparser LiDAR)
+   8. semantic noise    erase the painted class of random points / of whole
+                        objects: CARLA semantics are perfect, real (or
+                        predicted) segmentation is not
 
 Here an illustration of the algorithm
 ![img10](./imgs_readme/pointpillar.gif)
