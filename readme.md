@@ -9,7 +9,9 @@ This work focuses on detecting objects through semantic camera/Lidar, finds boun
 **specifications**
 
 - Images are rercorded at 20Hz
-
+- data are converted into a Kitti dataset, and each record has 1.A LIDAR points mapping in 3D and 2. the front camera.  
+- Some GT might not be aligned (offset of ~.5m detected)
+- Max x is 60 m. This repo will only consider distance for X < 40m, and Y -/+ 20m
 ## 1. Images taken by the vehicle.
 Images and inputs data are taken by Carla simulator. 
 
@@ -22,6 +24,35 @@ Also we have the Lidar data (here with a Bird-eye view representation)
 ![img2](./imgs_readme/lidar.gif)
 
 ## 2. Algorithms used
+### 2.1. Simple clustering apporach
+
+Below there is a simple workflow description:
+1. **LiDAR Preprocessing:**
+   - Load LiDAR points from KITTI format
+   - Filter to ROI using `X_LIMITS` and `Y_LIMITS`
+   - Project points to semantic image for labeling
+
+2. **Semantic Filtering:**
+   - Apply semantic labels based on `SEMANTIC_MODE`
+   - Remove points with "Unknown" labels in strict mode
+   - In permissive mode, all points are kept for clustering
+
+3. **DBSCAN Clustering:**
+   - Apply DBSCAN with `DBSCAN_EPS` and `DBSCAN_MIN_SAMPLES`
+   - Generate cluster labels
+   - Noise points get label -1
+
+4. **Semantic Agglomeration (if permissive):**
+   - Merge DBSCAN clusters by semantic class
+   - Use hierarchical clustering with distance threshold
+   - Apply class-based size constraints using `CLASS_MAX_EXTENT`
+
+5. **Bounding Box Fitting:**
+   - For clusters with >= `MIN_BOX_POINTS` points
+   - Use PCA to determine orientation, and create upright oriented bounding boxes
+
+6. **Ground Truth Matching:**
+   - Match detections to GT using `GT_MATCH_MAX_DIST`
 
 ### 2.3 Kalman filter
 
@@ -236,9 +267,30 @@ Metric: 95% bootstrap confidence interval (CI)
 ![img12](./imgs_readme/tracking_pointpillar.gif)
 
 
-## Prediction Error (RMSE) at Different Future Horizons
+#### 4.3.1 Comparing Kalman to baselines (CV & CA)
 
-### +1 frame (0.05 s ahead)
+### +5 frames (0.25 s) — All — VS Detection ($n = 252$)
+
+| Model | RMSE | 95% CI | Kalman − Model | Difference 95% CI | Kalman Better |
+| --- | --- | --- | --- | --- | --- |
+| Kalman | 1.239 | \[1.025, 1.463\] | — | — | — |
+| Constant Position | 1.965 | \[1.849, 2.102\] | −0.726\* | \[−0.876, −0.593\] | 83% |
+| Constant Velocity | 1.580 | \[1.259, 1.962\] | −0.341\* | \[−0.669, −0.092\] | 64% |
+
+### +5 frames (0.25 s) — All — vs. Ground Truth ($n = 229$)
+
+| Model | RMSE | 95% CI | Kalman − Model | Difference 95% CI | Kalman Better |
+| --- | --- | --- | --- | --- | --- |
+| Kalman | 1.484 | \[1.308, 1.669\] | — | — | — |
+| Constant Position | 2.519 | \[2.408, 2.637\] | −1.034\* | \[−1.159, −0.912\] | 89% |
+| Constant Velocity | 1.679 | \[1.324, 2.101\] | −0.195 | \[−0.607, +0.108\] | 50% |
+
+
+Note: `*` indicates a statistically significant difference.
+
+#### Prediction Error (RMSE) at Different Future Horizons
+
+#### +1 frame (0.05 s ahead)
 
 | Class | RMSE vs Detection (95% CI) | n | RMSE vs GT (95% CI) | n |
 | --- | --- | --- | --- | --- |
@@ -247,7 +299,7 @@ Metric: 95% bootstrap confidence interval (CI)
 | Pedestrian | 0.119 \[0.090, 0.148\] | 33 | 0.088 \[0.060, 0.121\] | 33 |
 | Vehicle | 0.696 \[0.535, 0.882\] | 230 | 1.079 \[0.995, 1.191\] | 200 |
 
-### +3 frames (0.15 s ahead)
+#### +3 frames (0.15 s ahead)
 
 | Class | RMSE vs Detection (95% CI) | n | RMSE vs GT (95% CI) | n |
 | --- | --- | --- | --- | --- |
@@ -256,7 +308,7 @@ Metric: 95% bootstrap confidence interval (CI)
 | Pedestrian | 0.126 \[0.097, 0.156\] | 32 | 0.106 \[0.079, 0.138\] | 32 |
 | Vehicle | 1.084 \[0.846, 1.311\] | 210 | 1.386 \[1.242, 1.556\] | 184 |
 
-### +5 frames (0.25 s ahead)
+#### +5 frames (0.25 s ahead)
 
 | Class | RMSE vs Detection (95% CI) | n | RMSE vs GT (95% CI) | n |
 | --- | --- | --- | --- | --- |
@@ -279,3 +331,30 @@ Notes:
 
 - prediction at +5
 ![img9](./imgs_readme/img_aggregated_trajectories_pred_+5ptpillar.png)
+
+#### RMSE, MOTA, IDF1
+
+![img10](./imgs_readme/img_all_error_plot_ptpillar.png)
+
+RMSE through distance
+
+**MOT Metrics: MOTA/IDF1**
+
+![pt_pillar](./imgs_readme/img_mot_vs_dist_ptpillar.png)
+![pt_pilaridf1](./imgs_readme/img_mot_vs_range_ptpillar.png)
+
+
+Evaluation parameters:
+
+- Frames: 411
+- Matching threshold: ≤ 2.0 m
+- State handling: Updated + predicted states
+- Maximum range: ≤ 40.0 m
+
+| Class | MOTA | MOTP (m) | IDF1 | IDP | IDR | GT | FN | FP | IDSW | GT IDs | Tracks | MT | ML |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| All | +0.321 | 0.695 | 0.547 | 0.746 | 0.431 | 654 | 359 | 83 | 2 | 12 | 16 | 7 | 3 |
+| Cyclist | +0.607 | 0.108 | 0.761 | 0.972 | 0.625 | 56 | 21 | 1 | 0 | 2 | 1 | 1 | 1 |
+| Pedestrian | +0.667 | 0.055 | 0.800 | 1.000 | 0.667 | 63 | 21 | 0 | 0 | 2 | 1 | 1 | 1 |
+| Vehicle | +0.250 | 0.912 | 0.491 | 0.683 | 0.383 | 535 | 317 | 82 | 2 | 8 | 14 | 5 | 1 |
+
