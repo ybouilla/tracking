@@ -60,8 +60,7 @@ All data comes from the [CARLA](https://carla.org/) simulator and is recorded at
 | Weather | ClearNoon |
 | Scenario length | 1000 frames (50 s at 20 Hz) |
 
-> _TODO: which frames / sequences are used for PointPillars training and validation, and whether the 411-frame evaluation sequence is separate from them._
-
+> pointpillar has been trained over 3000 frames, using sevral towns, lightning condition
 ---
 
 ## 2. Algorithm 1: DBSCAN detection (baseline)
@@ -70,8 +69,11 @@ All data comes from the [CARLA](https://carla.org/) simulator and is recorded at
 2. Points from the classes of interest are clustered in BEV with DBSCAN.
 3. A box is fitted to each cluster, and its class comes from the semantic label.
 
-> _TODO: DBSCAN parameters (`eps`, `min_samples`) and how boxes are fitted._
-
+**Paramètres DBSCAN**
+```
+DBSCAN_EPS = 0.6
+DBSCAN_MIN_SAMPLES = 3
+```
 | Semantic camera + LiDAR | BEV DBSCAN clusters |
 | --- | --- |
 | ![Semantic camera and LiDAR](./imgs_readme/semantic_camera_lidar.gif) | ![DBSCAN clusters](./imgs_readme/bev_dbscan_cluster.gif) |
@@ -80,19 +82,19 @@ All data comes from the [CARLA](https://carla.org/) simulator and is recorded at
 
 ## 3. Algorithm 2: PointPainting + PointPillars
 
-1. **PointPainting** (`painting.py`) projects each LiDAR point into the semantic camera image and appends the point's class as a one-hot vector. This step involves no learning; it only adds the camera semantics to the point cloud:
+1. **PointPainting** projects each LiDAR point into the semantic camera image and appends the point's class as a one-hot vector. This step involves no learning; it only adds the camera semantics to the point cloud:
 
    ```
    (x, y, z, intensity) -> (x, y, z, intensity, background, vehicle, pedestrian, two_wheeler)
    ```
 
-2. **[PointPillars](https://arxiv.org/abs/1812.05784)** (`model.py`) groups the painted points into vertical columns (pillars, 0.16 m) on a BEV grid and encodes them. A 2D CNN then predicts 3D boxes. The head is **CenterPoint-style** (a heatmap of object centres plus box regression) rather than anchor-based, so there are no per-class anchor sizes to tune.
+2. **[PointPillars](https://arxiv.org/abs/1812.05784)**  groups the painted points into vertical columns (pillars, 0.16 m) on a BEV grid and encodes them. A 2D CNN then predicts 3D boxes. The head is **CenterPoint-style** (a heatmap of object centres plus box regression) rather than anchor-based, so there are no per-class anchor sizes to tune.
 
 ![PointPillars](./imgs_readme/pointpillar.gif)
 
 ### Training augmentations
 
-These are applied in this order to every training frame (`Augmentor.__call__`):
+These are applied in this order to every training frame:
 
 | # | Augmentation | Purpose |
 | --- | --- | --- |
@@ -107,7 +109,7 @@ These are applied in this order to every training frame (`Augmentor.__call__`):
 
 ### Training
 
-The model is trained for **40 epochs**. The loss has three terms: the centre **heatmap** loss, the box **regression** loss, and an **uncertainty** term (it goes negative, as a learned-variance / negative log-likelihood term can). Per-epoch values are in `losses.csv`.
+The model is trained for **40 epochs**. The loss has three terms: the centre **heatmap** loss, the box **regression** loss, and an **uncertainty** term (it goes negative, as a learned-variance / negative log-likelihood term can).
 
 | Epoch | Train total | Train heatmap | Train reg. | Val total | Val heatmap | Val reg. |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -115,7 +117,7 @@ The model is trained for **40 epochs**. The loss has three terms: the centre **h
 | 10 | 0.373 | 0.282 | 1.332 | 0.709 | 0.559 | 1.462 |
 | 20 | 0.194 | 0.199 | 1.039 | 0.523 | 0.436 | 1.276 |
 | 30 | 0.043 | 0.139 | 0.801 | 0.412 | 0.351 | 1.123 |
-| **34 (best val)** | −0.004 | 0.122 | 0.721 | **0.373** | **0.348** | **0.958** |
+| **34** | −0.004 | 0.122 | 0.721 | **0.373** | **0.348** | **0.958** |
 | **40 (used)** | −0.032 | 0.113 | 0.676 | 0.391 | 0.371 | 0.958 |
 
 - Validation loss is noisy until ~epoch 20 (e.g. a spike at epoch 9) and plateaus from ~epoch 29. The best epoch is 34.
@@ -123,7 +125,7 @@ The model is trained for **40 epochs**. The loss has three terms: the centre **h
 
 All results in this readme use the **final checkpoint (epoch 40)**. Its validation loss (0.391) is close to the best epoch (0.373), so picking epoch 34 instead would change little.
 
-> _TODO: training set size, optimiser and learning rate, and what the uncertainty term models._
+> Trained over 3,000 frames, learning rate set to 2e-3, optimized with AdamW
 
 ---
 
@@ -131,7 +133,7 @@ All results in this readme use the **final checkpoint (epoch 40)**. Its validati
 
 Both detectors use the same tracker.
 
-**State.** Each track holds `[x, vx, y, vy]` (position in m, velocity in m/s) and a 4×4 covariance. By default tracking runs in the **world frame** (`TRACK_IN_WORLD = True`) using the ego poses. Otherwise a parked car would appear to move at minus the ego's speed.
+**State.** Each track holds `[x, vx, y, vy]` (position in m, velocity in m/s) and a 4×4 covariance. By default tracking runs in the **world frame** using the ego poses. Otherwise a parked car would appear to move at minus the ego's speed.
 
 **Measurement.** Only the box centroid `(x, y)` is used, with 0.5 m noise. The detector's yaw, box size and score are not used. Velocity is never measured directly; the filter infers it from successive positions.
 
@@ -284,7 +286,7 @@ RMSE between the predicted position and (a) the detection matched at t+h, (b) th
 The Kalman prediction is compared with two baselines on exactly the same samples:
 
 - **Constant position**: the object stays where it is (zero velocity).
-- **Constant velocity**: straight-line extrapolation without filtering. _TODO: confirm how this velocity is estimated (e.g. from the last two detections)._
+- **Constant velocity**: straight-line extrapolation without filtering. (Two-point finite difference)
 
 Δ = RMSE(Kalman) − RMSE(baseline), with a 95% paired bootstrap CI. A negative Δ means Kalman is better; **\*** means the CI of Δ excludes 0.
 
@@ -364,7 +366,7 @@ The Kalman prediction is compared with two baselines on exactly the same samples
 | **+3** (0.15 s) | 109 | 2.293 [2.091, 2.479] | 1.966 | 2.399 | +0.327 [+0.166, +0.486] \* | −0.106 [−0.555, +0.218] |
 | **+5** (0.25 s) | 96 | 2.565 [2.347, 2.766] | 2.260 | 2.597 | +0.305 [+0.040, +0.610] \* | −0.032 [−0.420, +0.270] |
 
-> _TODO: add per-class results for DBSCAN._
+> _TODO: add per-class results for DBSCAN._ see kal_db.txt
 
 **Observations**
 
@@ -425,7 +427,7 @@ Evaluated over 411 frames. A track matches a GT object if it is within 2.0 m. On
 - A systematic ~0.5–1 m centre offset on vans, which carries straight into the tracking error.
 - Likely confusion between cars and vans.
 
-**Next steps**
+**Next steps/opening**
 
 - Reduce the PointPillars train / validation gap (more varied training data: other towns and weathers, stronger regularisation, early stopping).
 - Investigate the van centre offset (box origin convention, length regression).
@@ -433,4 +435,4 @@ Evaluated over 411 frames. A track matches a GT object if it is within 2.0 m. On
 - Run the tracker on **ground-truth boxes**, to separate detection error from prediction error.
 - Compute per-class / ground-truth prediction results and MOT metrics for DBSCAN too.
 - Initialise track velocity from the first two detections, and tune the noise per class.
-- Try CTRV / IMM motion models or a learned predictor.
+- Try CTRV (Constant Turn Rate and Velocity) Model / IMM motion models ((Interacting Multiple Model) Filter) or a learned predictor.
