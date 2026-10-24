@@ -52,7 +52,15 @@ All data comes from the [CARLA](https://carla.org/) simulator and is recorded at
 | Car | 30 |
 | **Total** | **674** |
 
-> _TODO: CARLA town / map, number of sequences, and the PointPillars train/test split._
+**Scenario settings**
+
+| Setting | Value |
+| --- | --- |
+| Town | Town02 |
+| Weather | ClearNoon |
+| Scenario length | 1000 frames (50 s at 20 Hz) |
+
+> _TODO: which frames / sequences are used for PointPillars training and validation, and whether the 411-frame evaluation sequence is separate from them._
 
 ---
 
@@ -97,7 +105,25 @@ These are applied in this order to every training frame (`Augmentor.__call__`):
 | 7 | Point dropout | Remove random points (sparser LiDAR) |
 | 8 | Semantic noise | Erase the painted class of random points or whole objects: CARLA semantics are perfect, real (or predicted) segmentation is not |
 
-> _TODO: number of epochs, training set size, optimiser._
+### Training
+
+The model is trained for **40 epochs**. The loss has three terms: the centre **heatmap** loss, the box **regression** loss, and an **uncertainty** term (it goes negative, as a learned-variance / negative log-likelihood term can). Per-epoch values are in `losses.csv`.
+
+| Epoch | Train total | Train heatmap | Train reg. | Val total | Val heatmap | Val reg. |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | 2.953 | 2.349 | 2.972 | 2.987 | 2.674 | 2.017 |
+| 10 | 0.373 | 0.282 | 1.332 | 0.709 | 0.559 | 1.462 |
+| 20 | 0.194 | 0.199 | 1.039 | 0.523 | 0.436 | 1.276 |
+| 30 | 0.043 | 0.139 | 0.801 | 0.412 | 0.351 | 1.123 |
+| **34 (best val)** | −0.004 | 0.122 | 0.721 | **0.373** | **0.348** | **0.958** |
+| **40 (used)** | −0.032 | 0.113 | 0.676 | 0.391 | 0.371 | 0.958 |
+
+- Validation loss is noisy until ~epoch 20 (e.g. a spike at epoch 9) and plateaus from ~epoch 29. The best epoch is 34.
+- There is a clear **train / validation gap** at the end: the heatmap loss is 0.11 on train vs 0.37 on validation, and the regression loss 0.68 vs 0.96. The uncertainty term keeps decreasing on train (−3.14) but stays around −2.2 on validation. The model fits the training frames much better than unseen ones and becomes over-confident on them.
+
+All results in this readme use the **final checkpoint (epoch 40)**. Its validation loss (0.391) is close to the best epoch (0.373), so picking epoch 34 instead would change little.
+
+> _TODO: training set size, optimiser and learning rate, and what the uncertainty term models._
 
 ---
 
@@ -330,11 +356,21 @@ The Kalman prediction is compared with two baselines on exactly the same samples
 | **+3** (0.15 s) | 594 | 0.877 [0.795, 0.964] | 1.241 | 1.280 | −0.364 [−0.440, −0.288] \* | −0.403 [−0.994, +0.104] |
 | **+5** (0.25 s) | 563 | 1.163 [1.053, 1.269] | 2.031 | 1.393 | −0.867 [−0.975, −0.758] \* | −0.229 [−0.562, +0.097] |
 
-> _TODO: add per-class results and RMSE against ground truth for DBSCAN._
+**RMSE against ground truth (m), all classes**
+
+| Horizon | n | Kalman (95% CI) | Const. position | Const. velocity | Δ vs const. position | Δ vs const. velocity |
+| --- | --- | --- | --- | --- | --- | --- |
+| **+1** (0.05 s) | 118 | 2.224 [2.025, 2.438] | 2.027 | 2.155 | +0.197 [+0.112, +0.282] \* | +0.070 [−0.034, +0.175] |
+| **+3** (0.15 s) | 109 | 2.293 [2.091, 2.479] | 1.966 | 2.399 | +0.327 [+0.166, +0.486] \* | −0.106 [−0.555, +0.218] |
+| **+5** (0.25 s) | 96 | 2.565 [2.347, 2.766] | 2.260 | 2.597 | +0.305 [+0.040, +0.610] \* | −0.032 [−0.420, +0.270] |
+
+> _TODO: add per-class results for DBSCAN._
 
 **Observations**
 
-- **Kalman vs constant position**: constant position is better at +1 frame (objects barely move in 0.05 s). From +3 frames on, Kalman is significantly better, and the gap grows with the horizon (1.16 vs 2.03 m at +5). This is the same pattern as with PointPillars.
+- **Kalman vs constant position, against the detection**: constant position is better at +1 frame (objects barely move in 0.05 s). From +3 frames on, Kalman is significantly better, and the gap grows with the horizon (1.16 vs 2.03 m at +5).
+- **Against ground truth the result reverses**: constant position is significantly better than Kalman at every horizon (2.03 vs 2.22 m at +1, 2.26 vs 2.57 m at +5), unlike with PointPillars. The Kalman filter learns to follow the DBSCAN centroids well, but those centroids drift relative to the real objects, so the velocity it estimates is partly fake. One likely cause: a cluster's centroid is the centre of the *visible* points, which shifts as the viewpoint changes even for a parked car.
+- **Errors against ground truth are large (2.3–2.6 m)** and only ~17% of predictions match a GT object (96 of 563 at +5, vs 229 of 252 for PointPillars). Most DBSCAN tracks follow false or badly-placed detections.
 - **Kalman vs constant velocity**: the differences are not significant, but the constant-velocity baseline is very unstable (CI of [0.47, 1.63] m at +1). Raw DBSCAN centroids jump when clusters split or merge, and unfiltered velocities amplify these jumps. The Kalman filter smooths them out.
 - These DBSCAN numbers should not be compared directly with the PointPillars "All" row: DBSCAN tracks almost only vehicles (see the per-frame plot), and RMSE against detections measures consistency with the detector, not accuracy.
 
@@ -391,6 +427,7 @@ Evaluated over 411 frames. A track matches a GT object if it is within 2.0 m. On
 
 **Next steps**
 
+- Reduce the PointPillars train / validation gap (more varied training data: other towns and weathers, stronger regularisation, early stopping).
 - Investigate the van centre offset (box origin convention, length regression).
 - Lower the score threshold and add a confusion matrix.
 - Run the tracker on **ground-truth boxes**, to separate detection error from prediction error.
